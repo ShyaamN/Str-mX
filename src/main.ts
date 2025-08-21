@@ -505,74 +505,125 @@ function log(msg: string){
 function resize(){
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.floor(rect.width * dpr);
-  canvas.height = Math.floor(rect.height * dpr);
-  if(engine2d) engine2d.resize(canvas.width, canvas.height, dpr);
-  if(engine3d) engine3d.resize(canvas.width, canvas.height, dpr);
+  const width = Math.floor(rect.width * dpr);
+  const height = Math.floor(rect.height * dpr);
+  
+  log(`Resize called: rect=${rect.width}x${rect.height}, dpr=${dpr}, canvas size=${width}x${height}`);
+  
+  canvas.width = width;
+  canvas.height = height;
+  
+  if(engine2d) {
+    log(`Calling engine2d.resize(${width}, ${height}, ${dpr})`);
+    engine2d.resize(width, height, dpr);
+  }
+  if(engine3d) {
+    log(`Calling engine3d.resize(${width}, ${height}, ${dpr})`);
+    engine3d.resize(width, height, dpr);
+  }
 }
 window.addEventListener('resize', resize);
 
 function recreateCanvas(){
+  log('recreateCanvas() called');
   // Replace the canvas to reset any existing WebGL context and listeners
   const vp = document.getElementById('viewport')!;
   const old = document.getElementById('glcanvas');
-  if(old){ vp.removeChild(old); }
-  const c = document.createElement('canvas'); c.id = 'glcanvas';
-  c.style.position = 'absolute'; c.style.inset = '0'; c.style.width = '100%'; c.style.height = '100%';
+  if(old){ 
+    log('Removing old canvas');
+    vp.removeChild(old); 
+  }
+  const c = document.createElement('canvas'); 
+  c.id = 'glcanvas';
+  c.style.position = 'absolute'; 
+  c.style.inset = '0'; 
+  c.style.width = '100%'; 
+  c.style.height = '100%';
   // Ensure canvas sits below overlay widgets
   (c.style as any).zIndex = '1';
   vp.insertBefore(c, document.getElementById('overlay'));
   canvas = c as HTMLCanvasElement;
+  log(`New canvas created with id=${canvas.id}`);
 }
 
 function start2D(){
-  engine3d?.dispose(); engine3d = null;
-  stopNavLoop();
-  // remove 3D nav cube if present
-  if(nav3d){ nav3d.dispose(); nav3d = null; }
-  recreateCanvas();
+  log('start2D() called - beginning 2D mode initialization');
   
-  engine2d = new FluidEngine2D(canvas, overlay, log, (fps: number)=>{
-    const el = document.getElementById('fps'); if(el) el.textContent = `${fps.toFixed(0)} fps`;
-  }, (m: Metrics)=>updateMetrics(m));
-  engine2d.start();
-  resize();
-  // ensure a default circle exists
-  engine2d.addCircle();
-  // default to Draw tool and reset view so user can paint immediately
-  (engine2d as any).setTool?.('draw');
-  (engine2d as any).resetView?.();
-  // set visible overlay in 2D for clarity
-  try{
-    const sel = document.querySelector('#overlayVis') as HTMLSelectElement | null;
-    if(sel){ sel.value = 'dye'; }
-    (engine2d as any).setOverlayMode?.('dye');
-  } catch {}
-  // reflect tool state in UI buttons
-  const drawBtn = document.querySelector('#draw'); const selectBtn = document.querySelector('#select');
-  if(drawBtn && selectBtn){ drawBtn.classList.add('active'); selectBtn.classList.remove('active'); }
-  (window as any).updateLegend?.();
-  drawNavCube('2d');
-  log('Entered 2D mode');
-  // Add/update a mode badge to verify overlay visibility
-  let badge = document.getElementById('modeBadge');
-  if(!badge){
-    badge = document.createElement('div');
-    badge.id = 'modeBadge';
-    badge.style.position = 'absolute';
-    badge.style.top = '10px';
-    badge.style.left = '10px';
-    badge.style.zIndex = '99';
-    badge.style.background = '#0b1220cc';
-    badge.style.border = '1px solid #1f2a3a';
-    badge.style.borderRadius = '8px';
-    badge.style.padding = '4px 8px';
-    badge.style.color = '#8da2b5';
-    overlay.appendChild(badge);
+  try {
+    engine3d?.dispose(); engine3d = null;
+    stopNavLoop();
+    // remove 3D nav cube if present
+    if(nav3d){ nav3d.dispose(); nav3d = null; }
+    
+    log('start2D() - disposed 3D engine, recreating canvas');
+    recreateCanvas();
+    
+    log('start2D() - creating new 2D engine');
+    engine2d = new FluidEngine2D(canvas, overlay, log, (fps: number)=>{
+      const el = document.getElementById('fps'); if(el) el.textContent = `${fps.toFixed(0)} fps`;
+    }, (m: Metrics)=>updateMetrics(m));
+    
+    log('start2D() - starting 2D engine');
+    engine2d.start();
+    
+    log('start2D() - resizing canvas');
+    resize();
+    
+    log('start2D() - adding default circle');
+    // ensure a default circle exists
+    engine2d.addCircle();
+    
+    log('start2D() - setting tool and view');
+    // default to Draw tool and reset view so user can paint immediately
+    (engine2d as any).setTool?.('draw');
+    (engine2d as any).resetView?.();
+    
+    log('start2D() - setting overlay mode');
+    // set visible overlay in 2D for clarity
+    try{
+      const sel = document.querySelector('#overlayVis') as HTMLSelectElement | null;
+      if(sel){ sel.value = 'dye'; }
+      (engine2d as any).setOverlayMode?.('dye');
+    } catch(e) {
+      log('Error setting overlay mode: ' + e);
+    }
+    
+    log('start2D() - updating UI');
+    // reflect tool state in UI buttons
+    const drawBtn = document.querySelector('#draw'); const selectBtn = document.querySelector('#select');
+    if(drawBtn && selectBtn){ drawBtn.classList.add('active'); selectBtn.classList.remove('active'); }
+    (window as any).updateLegend?.();
+    drawNavCube('2d');
+    
+    log('start2D() - creating mode badge');
+    // Add/update a mode badge to verify overlay visibility
+    let badge = document.getElementById('modeBadge');
+    if(!badge){
+      badge = document.createElement('div');
+      badge.id = 'modeBadge';
+      badge.style.position = 'absolute';
+      badge.style.top = '10px';
+      badge.style.left = '10px';
+      badge.style.zIndex = '99';
+      badge.style.background = '#0b1220cc';
+      badge.style.border = '1px solid #1f2a3a';
+      badge.style.borderRadius = '8px';
+      badge.style.padding = '4px 8px';
+      badge.style.color = '#8da2b5';
+      overlay.appendChild(badge);
+    }
+    badge.textContent = '2D MODE';
+    
+    log('Entered 2D mode');
+    
+    // notify UI that 2D is ready for queued actions
+    document.dispatchEvent(new CustomEvent('fluidsim-2d-ready'));
+    
+    log('start2D() - initialization complete');
+  } catch(error) {
+    log('ERROR in start2D(): ' + error);
+    console.error('start2D() error:', error);
   }
-  badge.textContent = '2D MODE';
-  // notify UI that 2D is ready for queued actions
-  document.dispatchEvent(new CustomEvent('fluidsim-2d-ready'));
 }
 
 function start3D(){
@@ -625,7 +676,17 @@ function updateMetrics(m: {Re:number; Cd:number; Cl:number; dP:number}){
 }
 
 setupUI(sidebar, {
-  onMode:(m: '2d' | '3d')=>{ mode=m; if(m==='2d') start2D(); else start3D(); },
+  onMode:(m: '2d' | '3d')=>{ 
+    log(`Mode switch triggered: ${m}`);
+    mode=m; 
+    if(m==='2d') {
+      log('Calling start2D()');
+      start2D(); 
+    } else {
+      log('Calling start3D()');
+      start3D(); 
+    }
+  },
   get2d:()=>engine2d,
 });
 
@@ -715,3 +776,20 @@ if(loadBtn && loadFile) {
 }
 
 start3D();
+
+// Add a test to force 2D mode after a short delay
+setTimeout(() => {
+  log('AUTO TEST: Forcing 2D mode after 2 seconds');
+  try {
+    const modeSwitch = document.querySelector('#modeSwitch') as HTMLInputElement;
+    if (modeSwitch) {
+      log('AUTO TEST: Found mode switch, triggering change to 2D');
+      modeSwitch.checked = false;
+      modeSwitch.dispatchEvent(new Event('change'));
+    } else {
+      log('AUTO TEST: Mode switch not found!');
+    }
+  } catch (error) {
+    log('AUTO TEST ERROR: ' + error);
+  }
+}, 2000);

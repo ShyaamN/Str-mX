@@ -65,26 +65,52 @@ export class FluidEngine2D {
   private dbgCtx?: CanvasRenderingContext2D;
 
   constructor(private canvas: HTMLCanvasElement, overlay: HTMLElement, public log: LogFn, private onFps:(fps:number)=>void, private onMetrics:(m:Metrics)=>void){
-    const gl = canvas.getContext('webgl2', {alpha:false, antialias:false, premultipliedAlpha:false});
-    if(!gl) throw new Error('WebGL2 not supported');
-    this.gl = gl;
-    this.overlay = overlay;
-    this.log('FluidEngine2D constructor - initializing WebGL2 context');
-    this.initGL();
-    this.installPointer();
-    this.initOverlay();
-    this.overlayMode = 'dye'; // default to dye mode to see drawn obstacles clearly
-    this.log('FluidEngine2D constructor complete');
+    this.log('FluidEngine2D constructor starting...');
+    
+    try {
+      // Check canvas dimensions first
+      const rect = canvas.getBoundingClientRect();
+      this.log(`Canvas dimensions: client=${rect.width}x${rect.height}, actual=${canvas.width}x${canvas.height}`);
+      
+      if (rect.width === 0 || rect.height === 0) {
+        throw new Error(`Canvas has zero dimensions: ${rect.width}x${rect.height}`);
+      }
+      
+      this.log('Getting WebGL2 context...');
+      const gl = canvas.getContext('webgl2', {alpha:false, antialias:false, premultipliedAlpha:false});
+      if(!gl) throw new Error('WebGL2 not supported');
+      this.gl = gl;
+      this.overlay = overlay;
+      this.log('FluidEngine2D constructor - WebGL2 context obtained, initializing...');
+      
+      this.log('Calling initGL()...');
+      this.initGL();
+      
+      this.log('Calling installPointer()...');
+      this.installPointer();
+      
+      this.log('Calling initOverlay()...');
+      this.initOverlay();
+      
+      this.overlayMode = 'dye'; // default to dye mode to see drawn obstacles clearly
+      this.log('FluidEngine2D constructor complete');
 
-  // Create debug overlay canvas (on top of WebGL, under UI)
-  this.dbgCanvas = document.createElement('canvas');
-  this.dbgCanvas.style.position = 'absolute';
-  this.dbgCanvas.style.inset = '0';
-  this.dbgCanvas.style.pointerEvents = 'none';
-  this.dbgCanvas.style.zIndex = '6';
-  this.overlay.appendChild(this.dbgCanvas);
-  this.dbgCtx = this.dbgCanvas.getContext('2d') || undefined;
-  this.overlay.classList.add('debugTint');
+      // Create debug overlay canvas (on top of WebGL, under UI)
+      this.log('Creating debug canvas...');
+      this.dbgCanvas = document.createElement('canvas');
+      this.dbgCanvas.style.position = 'absolute';
+      this.dbgCanvas.style.inset = '0';
+      this.dbgCanvas.style.pointerEvents = 'none';
+      this.dbgCanvas.style.zIndex = '6';
+      this.overlay.appendChild(this.dbgCanvas);
+      this.dbgCtx = this.dbgCanvas.getContext('2d') || undefined;
+      this.overlay.classList.add('debugTint');
+      this.log('FluidEngine2D constructor: debug canvas created');
+    } catch (error) {
+      this.log('ERROR in FluidEngine2D constructor: ' + error);
+      console.error('FluidEngine2D constructor error:', error);
+      throw error;
+    }
   }
 
   // UI hooks
@@ -253,9 +279,17 @@ export class FluidEngine2D {
   getObstacles(){ return this.obstacles; }
 
   start(){ 
-    this.log('FluidEngine2D starting animation loop');
-    this.lastT=performance.now(); 
-    this.loop(this.lastT); 
+    try {
+      this.log('FluidEngine2D starting animation loop');
+      this.lastT=performance.now(); 
+      this.log('Calling loop() with timestamp: ' + this.lastT);
+      this.loop(this.lastT); 
+      this.log('FluidEngine2D start() completed successfully');
+    } catch (error) {
+      this.log('ERROR in FluidEngine2D start(): ' + error);
+      console.error('FluidEngine2D start() error:', error);
+      throw error;
+    }
   }
   dispose(){ cancelAnimationFrame(this.raf); }
 
@@ -792,16 +826,26 @@ export class FluidEngine2D {
     this.metrics = {Re, Cd, Cl, dP}; this.onMetrics(this.metrics);
   }
   private loop(t:number){
-    const dt = Math.min(0.05, (t - this.lastT)/1000) || this.dt; this.lastT = t;
-    if(this.running){
-      this.step(this.dt);
+    try {
+      const dt = Math.min(0.05, (t - this.lastT)/1000) || this.dt; 
+      this.lastT = t;
+      
+      if(this.running){
+        this.step(this.dt);
+      }
+      
+      // fps
+      const fps = 1000/Math.max(1, (performance.now()-t));
+      this.fpsSmoothed = this.fpsSmoothed ? this.fpsSmoothed*0.9 + fps*0.1 : fps;
+      this.onFps(this.fpsSmoothed);
+      this.computeMetrics();
+      
+      this.raf = requestAnimationFrame((tt)=>this.loop(tt));
+    } catch (error) {
+      this.log('ERROR in FluidEngine2D loop(): ' + error);
+      console.error('FluidEngine2D loop() error:', error);
+      // Don't continue the loop if there's an error
     }
-    // fps
-    const fps = 1000/Math.max(1, (performance.now()-t));
-    this.fpsSmoothed = this.fpsSmoothed ? this.fpsSmoothed*0.9 + fps*0.1 : fps;
-    this.onFps(this.fpsSmoothed);
-    this.computeMetrics();
-    this.raf = requestAnimationFrame((tt)=>this.loop(tt));
   }
 
   private step(dt:number){

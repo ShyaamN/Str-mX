@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug 2D Mode</title>
+</head>
+<body>
+    <h1>Debug 2D Mode</h1>
+    <button onclick="test2DSwitch()">Test 2D Switch</button>
+    <button onclick="checkConsole()">Check Console Logs</button>
+    <div id="log"></div>
+    
+    <script>
+        function test2DSwitch() {
+            console.log('Testing 2D mode switch...');
+            
+            // Simulate clicking the mode switch
+            const modeSwitch = document.querySelector('#modeSwitch');
+            if (modeSwitch) {
+                console.log('Found mode switch, current value:', modeSwitch.checked);
+                modeSwitch.checked = false; // Switch to 2D
+                modeSwitch.dispatchEvent(new Event('change'));
+                console.log('Mode switch changed to:', modeSwitch.checked);
+            } else {
+                console.error('Mode switch not found');
+            }
+        }
+        
+        function checkConsole() {
+            const log = document.getElementById('log');
+            log.innerHTML = '<h3>Check browser console for error messages</h3>';
+        }
+        
+        // Load the main app
+        window.addEventListener('load', () => {
+            const iframe = document.createElement('iframe');
+            iframe.src = 'http://localhost:5174/';
+            iframe.style.width = '800px';
+            iframe.style.height = '600px';
+            iframe.style.border = '1px solid #ccc';
+            document.body.appendChild(iframe);
+            
+            iframe.onload = () => {
+                console.log('App loaded in iframe');
+                // Try to access the iframe's document
+                try {
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    window.iframeDoc = iframeDoc;
+                    console.log('Iframe document accessible');
+                } catch (e) {
+                    console.error('Cannot access iframe document:', e);
+                }
+            };
+        });
+    </script>
+</body>
+</html>

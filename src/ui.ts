@@ -163,7 +163,9 @@ export function setupUI(root: HTMLElement, hooks: UIHooks){
   const modeSwitch = root.querySelector('#modeSwitch') as HTMLInputElement;
   // default 3D on
   modeSwitch.checked = true;
+  console.log('Mode switch found and initialized:', modeSwitch);
   modeSwitch.addEventListener('change', ()=>{
+    console.log('Mode switch changed to:', modeSwitch.checked ? '3d' : '2d');
     hooks.onMode(modeSwitch.checked ? '3d' : '2d');
   });
 
@@ -245,8 +247,25 @@ export function setupUI(root: HTMLElement, hooks: UIHooks){
   window.addEventListener('keydown', (e)=>{
     if(e.key==='d'){ drawBtn.click(); }
     if(e.key==='s'){ selectBtn.click(); }
-  if(e.key==='r'){ (qs('#reset') as HTMLElement).click(); }
-  (window as any).appLog?.(`Key: ${e.key}`);
+    if(e.key==='r'){ (qs('#reset') as HTMLElement).click(); }
+    // Test 2D mode switch
+    if(e.key==='2'){ 
+      console.log('2 key pressed - forcing 2D mode');
+      const modeSwitch = document.querySelector('#modeSwitch') as HTMLInputElement;
+      if(modeSwitch) {
+        modeSwitch.checked = false;
+        modeSwitch.dispatchEvent(new Event('change'));
+      }
+    }
+    if(e.key==='3'){ 
+      console.log('3 key pressed - forcing 3D mode');
+      const modeSwitch = document.querySelector('#modeSwitch') as HTMLInputElement;
+      if(modeSwitch) {
+        modeSwitch.checked = true;
+        modeSwitch.dispatchEvent(new Event('change'));
+      }
+    }
+    (window as any).appLog?.(`Key: ${e.key}`);
   });
 
   // Undo/redo/snap/align/duplicate
