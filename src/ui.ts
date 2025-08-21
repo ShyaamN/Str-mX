@@ -163,9 +163,8 @@ export function setupUI(root: HTMLElement, hooks: UIHooks){
   const modeSwitch = root.querySelector('#modeSwitch') as HTMLInputElement;
   // default 3D on
   modeSwitch.checked = true;
-  console.log('Mode switch found and initialized:', modeSwitch);
   modeSwitch.addEventListener('change', ()=>{
-    console.log('Mode switch changed to:', modeSwitch.checked ? '3d' : '2d');
+    console.log('Mode switch:', modeSwitch.checked ? '3D' : '2D');
     hooks.onMode(modeSwitch.checked ? '3d' : '2d');
   });
 

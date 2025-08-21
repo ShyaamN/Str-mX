@@ -547,79 +547,89 @@ function recreateCanvas(){
 }
 
 function start2D(){
-  log('start2D() called - beginning 2D mode initialization');
+  log('Switching to 2D mode...');
   
   try {
     engine3d?.dispose(); engine3d = null;
     stopNavLoop();
-    // remove 3D nav cube if present
     if(nav3d){ nav3d.dispose(); nav3d = null; }
     
-    log('start2D() - disposed 3D engine, recreating canvas');
     recreateCanvas();
     
-    log('start2D() - creating new 2D engine');
-    engine2d = new FluidEngine2D(canvas, overlay, log, (fps: number)=>{
-      const el = document.getElementById('fps'); if(el) el.textContent = `${fps.toFixed(0)} fps`;
-    }, (m: Metrics)=>updateMetrics(m));
-    
-    log('start2D() - starting 2D engine');
-    engine2d.start();
-    
-    log('start2D() - resizing canvas');
-    resize();
-    
-    log('start2D() - adding default circle');
-    // ensure a default circle exists
-    engine2d.addCircle();
-    
-    log('start2D() - setting tool and view');
-    // default to Draw tool and reset view so user can paint immediately
-    (engine2d as any).setTool?.('draw');
-    (engine2d as any).resetView?.();
-    
-    log('start2D() - setting overlay mode');
-    // set visible overlay in 2D for clarity
-    try{
-      const sel = document.querySelector('#overlayVis') as HTMLSelectElement | null;
-      if(sel){ sel.value = 'dye'; }
-      (engine2d as any).setOverlayMode?.('dye');
-    } catch(e) {
-      log('Error setting overlay mode: ' + e);
-    }
-    
-    log('start2D() - updating UI');
-    // reflect tool state in UI buttons
-    const drawBtn = document.querySelector('#draw'); const selectBtn = document.querySelector('#select');
-    if(drawBtn && selectBtn){ drawBtn.classList.add('active'); selectBtn.classList.remove('active'); }
-    (window as any).updateLegend?.();
-    drawNavCube('2d');
-    
-    log('start2D() - creating mode badge');
-    // Add/update a mode badge to verify overlay visibility
-    let badge = document.getElementById('modeBadge');
-    if(!badge){
-      badge = document.createElement('div');
-      badge.id = 'modeBadge';
-      badge.style.position = 'absolute';
-      badge.style.top = '10px';
-      badge.style.left = '10px';
-      badge.style.zIndex = '99';
-      badge.style.background = '#0b1220cc';
-      badge.style.border = '1px solid #1f2a3a';
-      badge.style.borderRadius = '8px';
-      badge.style.padding = '4px 8px';
-      badge.style.color = '#8da2b5';
-      overlay.appendChild(badge);
-    }
-    badge.textContent = '2D MODE';
-    
-    log('Entered 2D mode');
-    
-    // notify UI that 2D is ready for queued actions
-    document.dispatchEvent(new CustomEvent('fluidsim-2d-ready'));
-    
-    log('start2D() - initialization complete');
+    // Wait a frame for layout to be computed
+    requestAnimationFrame(() => {
+      try {
+        // Ensure canvas has dimensions before creating engine
+        const rect = canvas.getBoundingClientRect();
+        log(`Canvas dimensions: ${rect.width}x${rect.height}`);
+        
+        if (rect.width === 0 || rect.height === 0) {
+          // Force canvas dimensions if layout hasn't computed yet
+          const viewport = document.getElementById('viewport');
+          if (viewport) {
+            const vpRect = viewport.getBoundingClientRect();
+            if (vpRect.width > 0 && vpRect.height > 0) {
+              canvas.style.width = vpRect.width + 'px';
+              canvas.style.height = vpRect.height + 'px';
+              log('Fixed canvas dimensions from viewport');
+            } else {
+              canvas.style.width = '800px';
+              canvas.style.height = '600px';
+              log('Used fallback canvas dimensions');
+            }
+          }
+        }
+        
+        engine2d = new FluidEngine2D(canvas, overlay, log, (fps: number)=>{
+          const el = document.getElementById('fps'); if(el) el.textContent = `${fps.toFixed(0)} fps`;
+        }, (m: Metrics)=>updateMetrics(m));
+        
+        engine2d.start();
+        resize();
+        engine2d.addCircle();
+        (engine2d as any).setTool?.('draw');
+        (engine2d as any).resetView?.();
+        
+        try{
+          const sel = document.querySelector('#overlayVis') as HTMLSelectElement | null;
+          if(sel){ sel.value = 'dye'; }
+          (engine2d as any).setOverlayMode?.('dye');
+        } catch(e) {
+          log('Error setting overlay mode: ' + e);
+        }
+        
+        // Update UI
+        const drawBtn = document.querySelector('#draw'); const selectBtn = document.querySelector('#select');
+        if(drawBtn && selectBtn){ drawBtn.classList.add('active'); selectBtn.classList.remove('active'); }
+        (window as any).updateLegend?.();
+        drawNavCube('2d');
+        
+        // Add mode badge
+        let badge = document.getElementById('modeBadge');
+        if(!badge){
+          badge = document.createElement('div');
+          badge.id = 'modeBadge';
+          badge.style.position = 'absolute';
+          badge.style.top = '10px';
+          badge.style.left = '10px';
+          badge.style.zIndex = '99';
+          badge.style.background = '#0b1220cc';
+          badge.style.border = '1px solid #1f2a3a';
+          badge.style.borderRadius = '8px';
+          badge.style.padding = '4px 8px';
+          badge.style.color = '#8da2b5';
+          overlay.appendChild(badge);
+        }
+        badge.textContent = '2D MODE';
+        
+        log('Entered 2D mode');
+        document.dispatchEvent(new CustomEvent('fluidsim-2d-ready'));
+        
+      } catch(error) {
+        log('ERROR initializing 2D engine: ' + error);
+        console.error('2D engine initialization error:', error);
+      }
+    });
   } catch(error) {
     log('ERROR in start2D(): ' + error);
     console.error('start2D() error:', error);
@@ -677,13 +687,11 @@ function updateMetrics(m: {Re:number; Cd:number; Cl:number; dP:number}){
 
 setupUI(sidebar, {
   onMode:(m: '2d' | '3d')=>{ 
-    log(`Mode switch triggered: ${m}`);
+    log(`Switching to ${m.toUpperCase()} mode`);
     mode=m; 
     if(m==='2d') {
-      log('Calling start2D()');
       start2D(); 
     } else {
-      log('Calling start3D()');
       start3D(); 
     }
   },
@@ -776,20 +784,3 @@ if(loadBtn && loadFile) {
 }
 
 start3D();
-
-// Add a test to force 2D mode after a short delay
-setTimeout(() => {
-  log('AUTO TEST: Forcing 2D mode after 2 seconds');
-  try {
-    const modeSwitch = document.querySelector('#modeSwitch') as HTMLInputElement;
-    if (modeSwitch) {
-      log('AUTO TEST: Found mode switch, triggering change to 2D');
-      modeSwitch.checked = false;
-      modeSwitch.dispatchEvent(new Event('change'));
-    } else {
-      log('AUTO TEST: Mode switch not found!');
-    }
-  } catch (error) {
-    log('AUTO TEST ERROR: ' + error);
-  }
-}, 2000);

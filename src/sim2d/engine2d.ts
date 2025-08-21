@@ -65,38 +65,30 @@ export class FluidEngine2D {
   private dbgCtx?: CanvasRenderingContext2D;
 
   constructor(private canvas: HTMLCanvasElement, overlay: HTMLElement, public log: LogFn, private onFps:(fps:number)=>void, private onMetrics:(m:Metrics)=>void){
-    this.log('FluidEngine2D constructor starting...');
+    this.log('Initializing FluidEngine2D...');
     
     try {
       // Check canvas dimensions first
       const rect = canvas.getBoundingClientRect();
-      this.log(`Canvas dimensions: client=${rect.width}x${rect.height}, actual=${canvas.width}x${canvas.height}`);
+      this.log(`Canvas: ${rect.width}x${rect.height} (client), ${canvas.width}x${canvas.height} (actual)`);
       
       if (rect.width === 0 || rect.height === 0) {
         throw new Error(`Canvas has zero dimensions: ${rect.width}x${rect.height}`);
       }
       
-      this.log('Getting WebGL2 context...');
       const gl = canvas.getContext('webgl2', {alpha:false, antialias:false, premultipliedAlpha:false});
       if(!gl) throw new Error('WebGL2 not supported');
       this.gl = gl;
       this.overlay = overlay;
-      this.log('FluidEngine2D constructor - WebGL2 context obtained, initializing...');
       
-      this.log('Calling initGL()...');
       this.initGL();
-      
-      this.log('Calling installPointer()...');
       this.installPointer();
-      
-      this.log('Calling initOverlay()...');
       this.initOverlay();
       
-      this.overlayMode = 'dye'; // default to dye mode to see drawn obstacles clearly
-      this.log('FluidEngine2D constructor complete');
+      this.overlayMode = 'dye';
+      this.log('FluidEngine2D initialized successfully');
 
-      // Create debug overlay canvas (on top of WebGL, under UI)
-      this.log('Creating debug canvas...');
+      // Create debug overlay canvas
       this.dbgCanvas = document.createElement('canvas');
       this.dbgCanvas.style.position = 'absolute';
       this.dbgCanvas.style.inset = '0';
@@ -105,7 +97,7 @@ export class FluidEngine2D {
       this.overlay.appendChild(this.dbgCanvas);
       this.dbgCtx = this.dbgCanvas.getContext('2d') || undefined;
       this.overlay.classList.add('debugTint');
-      this.log('FluidEngine2D constructor: debug canvas created');
+      
     } catch (error) {
       this.log('ERROR in FluidEngine2D constructor: ' + error);
       console.error('FluidEngine2D constructor error:', error);
@@ -239,15 +231,24 @@ export class FluidEngine2D {
     this.syncObstacles(); 
     this.updateOverlay();
     this.log(`Circle obstacle added at (${circle.x}, ${circle.y}) radius ${circle.r}`);
+    this.log(`Total obstacles count: ${this.obstacles.length}`);
     
-    // Also add a bright dye splat at the circle location for immediate visibility
+    // Add an EXTREMELY bright and large dye splat for visibility testing
     this.drawTo(this.texDye, this.progSplat, (gl)=>{
       this.bindTexture(0, this.texDye);
       gl.uniform1i(gl.getUniformLocation(this.progSplat,'src'),0);
       gl.uniform2f(gl.getUniformLocation(this.progSplat,'p'), circle.x, circle.y);
-      gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), circle.r + 0.05);
-      gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 2.0, 4.0, 1.0);
+      gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), 0.3); // Much larger radius
+      gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 10.0, 10.0, 10.0); // Bright white
     });
+    
+    // Also force a debug overlay update
+    if (this.dbgCanvas && this.dbgCtx) {
+      this.log('Debug canvas available, drawing test circle...');
+      this.drawDebugOverlay();
+    } else {
+      this.log('Debug canvas NOT available');
+    }
   }
   addRect(){ 
     this.pushUndo();
@@ -1171,9 +1172,12 @@ export class FluidEngine2D {
   // Draw debug overlay: grid and obstacle outlines
   private drawDebugOverlay(){
     const ctx = this.dbgCtx; if(!ctx || !this.dbgCanvas) return;
+    this.log(`Drawing debug overlay: ${this.obstacles.length} obstacles`);
+    
     const cssW = this.dbgCanvas.width / this.dpr; // in CSS pixels
     const cssH = this.dbgCanvas.height / this.dpr;
     ctx.clearRect(0,0,cssW,cssH);
+    
     // Grid
     ctx.save();
     ctx.lineWidth = 1;
@@ -1182,6 +1186,7 @@ export class FluidEngine2D {
     for(let x=0; x<=cssW; x+=step){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,cssH); ctx.stroke(); }
     for(let y=0; y<=cssH; y+=step){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(cssW,y); ctx.stroke(); }
     ctx.restore();
+    
     // Obstacles
     ctx.save();
     ctx.strokeStyle = '#48e3b7';
@@ -1189,11 +1194,14 @@ export class FluidEngine2D {
     ctx.lineWidth = 2;
     for(const o of this.obstacles){
       if(o.kind==='circle' || o.kind==='rect'){
+        this.log(`Drawing obstacle: ${o.kind} at (${(o as any).x}, ${(o as any).y})`);
         const [sx, sy] = this.domainToScreen((o as any).x, (o as any).y);
+        this.log(`Screen coords: (${sx}, ${sy})`);
         if(o.kind==='circle'){
           // Approx radius in pixels: r (domain) scaled by zoom and canvas size (assume square scale by width)
           const [sx2, ] = this.domainToScreen((o as any).x + o.r, (o as any).y);
           const rPx = Math.abs(sx2 - sx);
+          this.log(`Circle radius in pixels: ${rPx}`);
           ctx.beginPath(); ctx.arc(sx, sy, rPx, 0, Math.PI*2); ctx.fill(); ctx.stroke();
         } else {
           const hw = (o.w||0)/2, hh = (o.h||0)/2;
@@ -1292,33 +1300,41 @@ export class FluidEngine2D {
   }
 
   private updateOverlay(){
-    if (!this.selection.id) {
-      this.handle.style.display = 'none';
-      this.polyHandles.forEach(h => h.style.display = 'none');
+    // Guard against calls before initOverlay() completes
+    if (!this.handle || !this.polyHandles) {
       return;
     }
-    const o = this.obstacles.find(o => o.id === this.selection.id); if (!o) { this.handle.style.display = 'none'; this.polyHandles.forEach(h => h.style.display = 'none'); return; }
+    
+    if (!this.selection.id) {
+      this.handle.style.display = 'none';
+      this.polyHandles.forEach(h => h && h.style && (h.style.display = 'none'));
+      return;
+    }
+    const o = this.obstacles.find(o => o.id === this.selection.id); if (!o) { this.handle.style.display = 'none'; this.polyHandles.forEach(h => h && h.style && (h.style.display = 'none')); return; }
     const r = this.canvas.getBoundingClientRect();
     if (o.kind === 'circle') {
       const u = o.x + o.r, v = o.y - o.r;
       const hs = this.handle.style; hs.display = 'block';
       hs.left = `${(u * r.width) - 6}px`; hs.top = `${((1 - v) * r.height) - 6}px`;
-      this.polyHandles.forEach(h => h.style.display = 'none');
+      this.polyHandles.forEach(h => h && h.style && (h.style.display = 'none'));
     } else if (o.kind === 'rect') {
       const u = o.x + o.w * 0.5, v = o.y - o.h * 0.5;
       const hs = this.handle.style; hs.display = 'block';
       hs.left = `${(u * r.width) - 6}px`; hs.top = `${((1 - v) * r.height) - 6}px`;
-      this.polyHandles.forEach(h => h.style.display = 'none');
+      this.polyHandles.forEach(h => h && h.style && (h.style.display = 'none'));
     } else if (o.kind === 'poly') {
       this.handle.style.display = 'none';
       o.points.forEach(([u, v], i) => {
         const h = this.polyHandles[i];
-        if (!h) return;
+        if (!h || !h.style) return;
         h.style.display = 'block';
         h.style.left = `${(u * r.width) - 6}px`;
         h.style.top = `${((1 - v) * r.height) - 6}px`;
       });
-      for (let i = o.points.length; i < this.polyHandles.length; ++i) this.polyHandles[i].style.display = 'none';
+      for (let i = o.points.length; i < this.polyHandles.length; ++i) {
+        const h = this.polyHandles[i];
+        if (h && h.style) h.style.display = 'none';
+      }
     }
   }
 
