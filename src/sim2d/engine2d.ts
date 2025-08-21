@@ -9,7 +9,18 @@ type LogFn = (msg:string)=>void;
 
 export type Metrics = { Re:number; Cd:number; Cl:number; dP:number };
 
-type Tool = 'draw'|'select';
+type Tool = 'draw'|'select'|'dye';
+
+type DyeSource = {
+  id: string;
+  x: number;
+  y: number;
+  dirX: number;
+  dirY: number;
+  strength: number;
+  color: [number, number, number];
+  radius: number;
+};
 
 type Obstacle =
   | { id: string; kind: 'circle'; x: number; y: number; w: number; h: number; r: number; rot: number }
@@ -52,6 +63,7 @@ export class FluidEngine2D {
   private running = true;
 
   private obstacles: Obstacle[] = [];
+  private dyeSources: DyeSource[] = [];
   private tool: Tool = 'select';
   private selection: {id:string|null, dragging:boolean, dx:number, dy:number, sizing:boolean} = {id:null, dragging:false, dx:0, dy:0, sizing:false};
 
@@ -63,6 +75,11 @@ export class FluidEngine2D {
   // Debug overlay canvas to visualize grid and obstacle outlines
   private dbgCanvas?: HTMLCanvasElement;
   private dbgCtx?: CanvasRenderingContext2D;
+  // Dye source gizmos (DOM overlays)
+  private dyeGizmos: Map<string, { root: HTMLDivElement; rot: HTMLDivElement }> = new Map();
+  // Overlay global listeners we need to remove on dispose
+  private overlayMoveListener?: (e: PointerEvent)=>void;
+  private overlayUpListener?: (e: PointerEvent)=>void;
 
   constructor(private canvas: HTMLCanvasElement, overlay: HTMLElement, public log: LogFn, private onFps:(fps:number)=>void, private onMetrics:(m:Metrics)=>void){
     this.log('Initializing FluidEngine2D...');
@@ -178,6 +195,109 @@ export class FluidEngine2D {
       this.canvas.removeEventListener('click', this.drawClickFallback, {capture: true});
     }
   }
+  
+  // Dye source management
+  addDyeSource(x: number, y: number, dirX: number = 1, dirY: number = 0): DyeSource {
+    const source: DyeSource = {
+      id: uid(),
+      x, y, dirX, dirY,
+      strength: 2.0,
+      color: [Math.random() * 0.5 + 0.5, Math.random() * 0.5 + 0.5, 1.0], // Random blue-ish colors
+      radius: 0.02
+    };
+  this.dyeSources.push(source);
+  this.log(`Added dye source at (${x.toFixed(2)}, ${y.toFixed(2)}) direction (${dirX.toFixed(2)}, ${dirY.toFixed(2)})`);
+  // Create UI gizmo
+  try{ this.createDyeGizmo(source); this.updateDyeGizmos(); }catch{}
+  return source;
+  }
+  
+  removeDyeSource(id: string) {
+    const index = this.dyeSources.findIndex(s => s.id === id);
+    if (index >= 0) {
+  this.dyeSources.splice(index, 1);
+      this.log(`Removed dye source ${id}`);
+  const g = this.dyeGizmos.get(id); if(g){ try{ g.rot.remove(); }catch{} try{ g.root.remove(); }catch{} this.dyeGizmos.delete(id); }
+    }
+  }
+  
+  clearDyeSources() {
+    this.dyeSources = [];
+    for(const {root, rot} of this.dyeGizmos.values()){
+      try{ rot.remove(); }catch{}; try{ root.remove(); }catch{}
+    }
+    this.dyeGizmos.clear();
+    this.log('All dye sources cleared');
+  }
+  
+  getDyeSources() {
+    return this.dyeSources;
+  }
+
+  // === Dye gizmo helpers ===
+  private createDyeGizmo(source: DyeSource){
+    const root = document.createElement('div');
+    root.style.position = 'absolute';
+    root.style.width = '24px'; root.style.height = '24px';
+    root.style.marginLeft = '-12px'; root.style.marginTop = '-12px';
+    root.style.border = '2px solid #48e3b7'; root.style.background = 'rgba(72,227,183,0.08)';
+    root.style.borderRadius = '4px'; root.style.boxSizing = 'border-box';
+    root.style.zIndex = '22'; root.style.cursor = 'move';
+    root.title = 'Drag to move dye source; rotate with handle';
+    const arrow = document.createElement('div');
+    arrow.style.position = 'absolute'; arrow.style.left = '50%'; arrow.style.top = '50%';
+    arrow.style.width = '0'; arrow.style.height = '0';
+    arrow.style.borderLeft = '6px solid #48e3b7';
+    arrow.style.borderTop = '4px solid transparent';
+    arrow.style.borderBottom = '4px solid transparent';
+    arrow.style.transformOrigin = '0 0';
+    root.appendChild(arrow);
+    const rot = document.createElement('div');
+    rot.style.position = 'absolute'; rot.style.width = '10px'; rot.style.height = '10px';
+    rot.style.marginLeft = '-5px'; rot.style.marginTop = '-22px';
+    rot.style.borderRadius = '50%'; rot.style.background = '#48e3b7'; rot.style.boxShadow = '0 0 0 2px #0b1220';
+    rot.style.cursor = 'grab'; rot.title = 'Drag to rotate';
+    this.overlay.appendChild(root); this.overlay.appendChild(rot);
+    this.dyeGizmos.set(source.id, {root, rot});
+
+    const toUV = (e: PointerEvent): [number, number] => {
+      const r=this.canvas.getBoundingClientRect(); return [(e.clientX-r.left)/r.width, (e.clientY-r.top)/r.height];
+    };
+    let dragging=false; let rotating=false;
+    root.addEventListener('pointerdown', (e)=>{ dragging=true; (e.currentTarget as HTMLElement).setPointerCapture((e as any).pointerId); e.stopPropagation(); e.preventDefault(); });
+    root.addEventListener('pointermove', (e)=>{ if(!dragging) return; const [u,v]=toUV(e); const [x,y]=this.screenToDomain(u,v); source.x=Math.max(0,Math.min(1,x)); source.y=Math.max(0,Math.min(1,y)); this.updateDyeGizmos(); });
+    root.addEventListener('pointerup', (e)=>{ dragging=false; (e.currentTarget as HTMLElement).releasePointerCapture?.((e as any).pointerId); });
+    rot.addEventListener('pointerdown', (e)=>{ rotating=true; (e.currentTarget as HTMLElement).setPointerCapture((e as any).pointerId); e.stopPropagation(); e.preventDefault(); });
+    rot.addEventListener('pointermove', (e)=>{
+      if(!rotating) return; const r=this.canvas.getBoundingClientRect(); const cx=parseFloat(root.style.left||'0'); const cy=parseFloat(root.style.top||'0');
+      const px=e.clientX - r.left; const py=e.clientY - r.top; const dx=px-cx; const dy=py-cy; const len=Math.hypot(dx,dy)||1;
+      // Convert screen dy into domain direction (invert Y)
+      source.dirX = dx/len; source.dirY = -dy/len;
+      this.updateDyeGizmos();
+    });
+    rot.addEventListener('pointerup', (e)=>{ rotating=false; (e.currentTarget as HTMLElement).releasePointerCapture?.((e as any).pointerId); });
+  }
+
+  private updateDyeGizmos(){
+    for(const s of this.dyeSources){
+      const g = this.dyeGizmos.get(s.id); if(!g) continue;
+      const [sx, sy] = this.domainToScreen(s.x, s.y);
+      g.root.style.left = `${sx}px`; g.root.style.top = `${sy}px`;
+      // place rotate handle along direction
+      const ang = Math.atan2(s.dirY, s.dirX);
+      const r = 22;
+      g.rot.style.left = `${sx + Math.cos(ang)*r}px`;
+      g.rot.style.top  = `${sy - Math.sin(ang)*r}px`;
+      const arrow = g.root.firstChild as HTMLDivElement | null; if(arrow){ arrow.style.transform = `translate(-2px,-2px) rotate(${ang}rad)`; }
+    }
+  }
+
+  private rebuildDyeGizmos(){
+    for(const {root, rot} of this.dyeGizmos.values()){ try{ rot.remove(); }catch{} try{ root.remove(); }catch{} }
+    this.dyeGizmos.clear();
+    for(const s of this.dyeSources) this.createDyeGizmo(s);
+    this.updateDyeGizmos();
+  }
 
   private drawClickFallback = (e: MouseEvent) => {
     if(this.tool !== 'draw') return;
@@ -252,10 +372,20 @@ export class FluidEngine2D {
   }
   addRect(){ 
     this.pushUndo();
-    this.obstacles.push({id:uid(), kind:'rect', x:0.6, y:0.5, w:0.15, h:0.1, r:0, rot:0}); 
+    const rect = {id:uid(), kind:'rect' as const, x:0.6, y:0.5, w:0.15, h:0.1, r:0, rot:0};
+    this.obstacles.push(rect); 
+    this.log(`Rectangle obstacle added: id=${rect.id}, pos=(${rect.x}, ${rect.y}), size=(${rect.w}x${rect.h})`);
+    this.log(`Total obstacles: ${this.obstacles.length}`);
     this.syncObstacles(); 
     this.updateOverlay();
-    this.log('Rectangle obstacle added');
+    
+    // Force immediate debug overlay redraw
+    if (this.dbgCanvas && this.dbgCtx) {
+      this.log('Forcing debug overlay update for rectangle...');
+      this.drawDebugOverlay();
+    } else {
+      this.log('ERROR: Debug canvas not available for rectangle visualization');
+    }
   }
   addPolygon(points?: [number, number][]) {
     // Default: triangle in center
@@ -292,7 +422,29 @@ export class FluidEngine2D {
       throw error;
     }
   }
-  dispose(){ cancelAnimationFrame(this.raf); }
+  dispose(){
+    cancelAnimationFrame(this.raf);
+    // Remove canvas fallback listener
+    try { this.canvas.removeEventListener('click', this.drawClickFallback as any, { capture: true } as any); } catch{}
+    // Remove overlay handles
+    try {
+      if(this.polyHandles){ for(const h of this.polyHandles){ try{ h.remove(); }catch{} } this.polyHandles = []; }
+      if(this.handle){ try{ this.handle.remove(); }catch{} }
+      // Remove dye gizmos
+      for(const {root, rot} of this.dyeGizmos.values()){
+        try{ rot.remove(); }catch{}
+        try{ root.remove(); }catch{}
+      }
+      this.dyeGizmos.clear();
+      // Remove global listeners
+      if(this.overlayMoveListener) window.removeEventListener('pointermove', this.overlayMoveListener);
+      if(this.overlayUpListener) window.removeEventListener('pointerup', this.overlayUpListener);
+      this.overlayMoveListener = undefined; this.overlayUpListener = undefined;
+      // Remove debug canvas
+      if(this.dbgCanvas){ try{ this.dbgCanvas.remove(); }catch{} this.dbgCanvas = undefined; this.dbgCtx = undefined; }
+      this.overlay.classList.remove('debugTint');
+    } catch{}
+  }
 
   resize(w:number, h:number, dpr:number){ 
     this.log(`FluidEngine2D resize: ${w}x${h} dpr=${dpr}`);
@@ -958,16 +1110,44 @@ export class FluidEngine2D {
       gl.uniform2f(gl.getUniformLocation(this.progNoSlip,'px'), invRes[0], invRes[1]);
     }); [this.texVel, this.texVelTmp] = [this.texVelTmp, this.texVel];
 
-    // inlet dye injection and fading
-    for(let i=0;i<3;i++){
-      const py = 0.2 + 0.6*Math.random();
+    // inlet dye injection and fading - use custom dye sources
+    for (const source of this.dyeSources) {
       this.drawTo(this.texDye, this.progSplat, (gl)=>{
         this.bindTexture(0, this.texDye);
         gl.uniform1i(gl.getUniformLocation(this.progSplat,'src'),0);
-        gl.uniform2f(gl.getUniformLocation(this.progSplat,'p'), 0.02, py);
-        gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), 0.01);
-        gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 0.2, 0.6, 1.5);
+        gl.uniform2f(gl.getUniformLocation(this.progSplat,'p'), source.x, source.y);
+        gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), source.radius);
+        gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 
+          source.color[0] * source.strength, 
+          source.color[1] * source.strength, 
+          source.color[2] * source.strength);
       });
+      
+      // Add velocity at dye source location for flow effect
+      this.drawTo(this.texVel, this.progSplat, (gl)=>{
+        this.bindTexture(0, this.texVel);
+        gl.uniform1i(gl.getUniformLocation(this.progSplat,'src'),0);
+        gl.uniform2f(gl.getUniformLocation(this.progSplat,'p'), source.x, source.y);
+        gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), source.radius * 2);
+        gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 
+          source.dirX * source.strength * 0.5, 
+          source.dirY * source.strength * 0.5, 
+          0);
+      });
+    }
+    
+    // Add default flow sources if no custom sources exist
+    if (this.dyeSources.length === 0) {
+      for(let i=0;i<3;i++){
+        const py = 0.2 + 0.6*Math.random();
+        this.drawTo(this.texDye, this.progSplat, (gl)=>{
+          this.bindTexture(0, this.texDye);
+          gl.uniform1i(gl.getUniformLocation(this.progSplat,'src'),0);
+          gl.uniform2f(gl.getUniformLocation(this.progSplat,'p'), 0.02, py);
+          gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), 0.01);
+          gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 0.2, 0.6, 1.5);
+        });
+      }
     }
     this.drawTo(this.texDyeTmp, this.progFade, (gl)=>{
       this.bindTexture(0, this.texDye);
@@ -992,7 +1172,9 @@ export class FluidEngine2D {
       gl.uniform1i(gl.getUniformLocation(this.progCopy, 'src'), 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       this.log('Rendered dye texture directly with progCopy');
-      return;
+  // Still draw the debug overlay (obstacles, handles) on top of the dye view
+  try { this.drawDebugOverlay(); } catch (e) { this.log('Error drawing debug overlay: '+e); }
+  return;
     }
     
     // Compute LIC streamlines only if requested
@@ -1042,6 +1224,9 @@ export class FluidEngine2D {
     }
     
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    
+    // Draw debug overlay after main rendering
+    this.drawDebugOverlay();
   }
 
   private installPointer(){
@@ -1086,6 +1271,13 @@ export class FluidEngine2D {
           gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), 0.1);
           gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 10.0, 5.0, 2.0);
         });
+      }
+      else if(this.tool==='dye'){
+        // Start placing a dye source - record the starting position
+        const [ux,uy] = this.screenToDomain(last[0], last[1]);
+        this.log(`Dye tool START @ ${ux.toFixed(3)}, ${uy.toFixed(3)}`);
+        // Store start position for calculating direction on drag
+        (this as any).dyeStart = [ux, uy];
       } else {
         // select obstacle near pointer
         const [x, y] = this.screenToDomain(last[0], last[1]);
@@ -1130,6 +1322,16 @@ export class FluidEngine2D {
           gl.uniform1f(gl.getUniformLocation(this.progSplat,'r'), 0.06);
           gl.uniform3f(gl.getUniformLocation(this.progSplat,'color'), 8.0, 4.0, 1.0);
         });
+      }
+      else if(this.tool==='dye' && (this as any).dyeStart){
+        // Show direction preview while dragging
+        const [ux,uy] = this.screenToDomain(x, y);
+        const [startX, startY] = (this as any).dyeStart;
+        const dirX = ux - startX;
+        const dirY = uy - startY;
+        const dist = Math.hypot(dirX, dirY);
+        this.log(`Dye direction preview: dist=${dist.toFixed(3)}, dir=[${dirX.toFixed(3)}, ${dirY.toFixed(3)}]`);
+        // TODO: Visual preview could be added to debug overlay here
       } else if(this.selection.id){
         const o = this.obstacles.find(o=>o.id===this.selection.id);
         if (o) {
@@ -1146,6 +1348,32 @@ export class FluidEngine2D {
     });
     el.addEventListener('pointerup', (e)=>{ 
       e.preventDefault();
+      
+      // Handle dye source creation before cleaning up
+      if(this.tool==='dye' && (this as any).dyeStart && dragging){
+        const [x,y]=toUV(e);
+        const [ux,uy] = this.screenToDomain(x, y);
+        const [startX, startY] = (this as any).dyeStart;
+        const dirX = ux - startX;
+        const dirY = uy - startY;
+        const dist = Math.hypot(dirX, dirY);
+        
+        // Normalize direction or use default if no drag
+        let normalizedDirX = 0.1; // default right
+        let normalizedDirY = 0;
+        if(dist > 0.01) { // Only use direction if there was significant drag
+          normalizedDirX = dirX / dist * 0.2; // Scale to reasonable strength
+          normalizedDirY = dirY / dist * 0.2;
+        }
+        
+        // Create the dye source using the method parameters
+        this.addDyeSource(startX, startY, normalizedDirX, normalizedDirY);
+        this.log(`Created dye source at [${startX.toFixed(3)}, ${startY.toFixed(3)}] with direction [${normalizedDirX.toFixed(3)}, ${normalizedDirY.toFixed(3)}]`);
+        
+        // Clean up
+        delete (this as any).dyeStart;
+      }
+      
       dragging=false; 
       panning=false; 
       el.releasePointerCapture(e.pointerId); 
@@ -1166,13 +1394,25 @@ export class FluidEngine2D {
     const v = 1 - (((y - this.view.ofs[1] - 0.5) * this.view.zoom) + 0.5);
     const cssW = this.canvas.clientWidth || this.W/this.dpr; // fallback
     const cssH = this.canvas.clientHeight || this.H/this.dpr;
-    return [u * cssW, v * cssH];
+    const result: [number, number] = [u * cssW, v * cssH];
+    
+    // Debug log for rectangle transforms
+    if (Math.random() < 0.1) { // Only log 10% of the time to avoid spam
+      this.log(`DEBUG domainToScreen: domain(${x.toFixed(3)}, ${y.toFixed(3)}) -> UV(${u.toFixed(3)}, ${v.toFixed(3)}) -> screen(${result[0].toFixed(1)}, ${result[1].toFixed(1)})`);
+      this.log(`DEBUG: view.zoom=${this.view.zoom}, view.ofs=[${this.view.ofs[0]}, ${this.view.ofs[1]}], cssW=${cssW}, cssH=${cssH}`);
+    }
+    
+    return result;
   }
 
   // Draw debug overlay: grid and obstacle outlines
   private drawDebugOverlay(){
-    const ctx = this.dbgCtx; if(!ctx || !this.dbgCanvas) return;
-    this.log(`Drawing debug overlay: ${this.obstacles.length} obstacles`);
+    const ctx = this.dbgCtx; if(!ctx || !this.dbgCanvas) {
+      this.log('DEBUG: drawDebugOverlay early return - no ctx or canvas');
+      return;
+    }
+    this.log(`DEBUG: Drawing debug overlay with ${this.obstacles.length} obstacles`);
+    this.log(`DEBUG: Canvas dimensions: ${this.dbgCanvas.width}x${this.dbgCanvas.height}, DPR: ${this.dpr}`);
     
     const cssW = this.dbgCanvas.width / this.dpr; // in CSS pixels
     const cssH = this.dbgCanvas.height / this.dpr;
@@ -1192,35 +1432,42 @@ export class FluidEngine2D {
     ctx.strokeStyle = '#48e3b7';
     ctx.fillStyle = 'rgba(72,227,183,0.08)';
     ctx.lineWidth = 2;
+    
+    this.log(`DEBUG: About to draw ${this.obstacles.length} obstacles`);
     for(const o of this.obstacles){
+      this.log(`DEBUG: Processing obstacle: ${o.kind} at (${(o as any).x}, ${(o as any).y})`);
       if(o.kind==='circle' || o.kind==='rect'){
-        this.log(`Drawing obstacle: ${o.kind} at (${(o as any).x}, ${(o as any).y})`);
         const [sx, sy] = this.domainToScreen((o as any).x, (o as any).y);
-        this.log(`Screen coords: (${sx}, ${sy})`);
+        this.log(`DEBUG: Screen coords for ${o.kind}: (${sx}, ${sy})`);
         if(o.kind==='circle'){
           // Approx radius in pixels: r (domain) scaled by zoom and canvas size (assume square scale by width)
           const [sx2, ] = this.domainToScreen((o as any).x + o.r, (o as any).y);
           const rPx = Math.abs(sx2 - sx);
-          this.log(`Circle radius in pixels: ${rPx}`);
+          this.log(`DEBUG: Circle radius in pixels: ${rPx}`);
           ctx.beginPath(); ctx.arc(sx, sy, rPx, 0, Math.PI*2); ctx.fill(); ctx.stroke();
         } else {
           const hw = (o.w||0)/2, hh = (o.h||0)/2;
+          this.log(`DEBUG: Rectangle half-dims: hw=${hw}, hh=${hh}`);
           const corners: [number,number][] = [
             this.domainToScreen((o as any).x-hw, (o as any).y-hh),
             this.domainToScreen((o as any).x+hw, (o as any).y-hh),
             this.domainToScreen((o as any).x+hw, (o as any).y+hh),
             this.domainToScreen((o as any).x-hw, (o as any).y+hh),
           ];
+          this.log(`DEBUG: Rectangle corners: ${JSON.stringify(corners)}`);
           ctx.beginPath(); ctx.moveTo(corners[0][0], corners[0][1]);
           for(let i=1;i<corners.length;i++){ ctx.lineTo(corners[i][0], corners[i][1]); }
           ctx.closePath(); ctx.fill(); ctx.stroke();
         }
       } else if(o.kind==='poly'){
         const pts = o.points.map(([x,y])=>this.domainToScreen(x,y));
+        this.log(`DEBUG: Polygon points: ${JSON.stringify(pts)}`);
         if(pts.length){ ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for(let i=1;i<pts.length;i++){ ctx.lineTo(pts[i][0], pts[i][1]); } ctx.closePath(); ctx.fill(); ctx.stroke(); }
       }
     }
     ctx.restore();
+    this.log(`DEBUG: Finished drawing debug overlay`);
+  try{ this.updateDyeGizmos(); }catch{}
   }
 
   // helper to convert screen uv to domain uv with current view

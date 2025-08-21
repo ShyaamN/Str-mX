@@ -8,7 +8,7 @@ export type FluidEngine2D = {
   reset(): void;
   pause(): void;
   resume(): void;
-  setTool(t: 'draw'|'select'): void;
+  setTool(t: 'draw'|'select'|'dye'): void;
   addCircle(): void;
   addRect(): void;
   clearObstacles(): void;
@@ -86,7 +86,7 @@ export function setupUI(root: HTMLElement, hooks: UIHooks){
   <div class="group collapsible open" data-group="obstacles">
     <div class="group-header"><span class="arrow">▼</span> <span>Obstacles (2D)</span></div>
     <div class="group-content">
-      <div class="row"><button id="draw" class="btn">Draw</button><button id="select" class="btn ghost">Select/Move</button></div>
+      <div class="row"><button id="draw" class="btn">Draw</button><button id="select" class="btn ghost">Select/Move</button><button id="dye" class="btn ghost">Dye Source</button></div>
       <div class="row"><button id="circle" class="btn">Add Circle</button><button id="rect" class="btn ghost">Add Rect</button><button id="poly" class="btn ghost">Add Polygon</button></div>
       <div class="row"><button id="undo" class="btn ghost">Undo</button><button id="redo" class="btn ghost">Redo</button></div>
       <div class="row"><button id="snap" class="btn ghost">Snap to Grid</button><button id="align" class="btn ghost">Align Center</button><button id="dupe" class="btn ghost">Duplicate</button></div>
@@ -205,8 +205,8 @@ export function setupUI(root: HTMLElement, hooks: UIHooks){
     paused ? hooks.get2d()?.pause() : hooks.get2d()?.resume();
   });
 
-  const setActive = (a:HTMLElement, b:HTMLElement)=>{ a.classList.add('active'); b.classList.remove('active'); };
-  const drawBtn = qs('#draw'); const selectBtn = qs('#select');
+  const setActive = (active:HTMLElement, ...others:HTMLElement[])=>{ active.classList.add('active'); others.forEach(btn=>btn.classList.remove('active')); };
+  const drawBtn = qs('#draw'); const selectBtn = qs('#select'); const dyeBtn = qs('#dye');
   const ensure2DThen = (fn:()=>void)=>{
     const eng = hooks.get2d();
     if(eng){ fn(); return; }
@@ -216,8 +216,9 @@ export function setupUI(root: HTMLElement, hooks: UIHooks){
     const once = ()=>{ document.removeEventListener('fluidsim-2d-ready', once as any); fn(); };
     document.addEventListener('fluidsim-2d-ready', once as any, { once: true } as any);
   };
-  drawBtn.addEventListener('click', ()=>{ ensure2DThen(()=>{ setActive(drawBtn, selectBtn); hooks.get2d()?.setTool('draw'); (window as any).appLog?.('Draw tool active'); }); });
-  selectBtn.addEventListener('click', ()=>{ ensure2DThen(()=>{ setActive(selectBtn, drawBtn); hooks.get2d()?.setTool('select'); (window as any).appLog?.('Select tool active'); }); });
+  drawBtn.addEventListener('click', ()=>{ ensure2DThen(()=>{ setActive(drawBtn, selectBtn, dyeBtn); hooks.get2d()?.setTool('draw'); (window as any).appLog?.('Draw tool active'); }); });
+  selectBtn.addEventListener('click', ()=>{ ensure2DThen(()=>{ setActive(selectBtn, drawBtn, dyeBtn); hooks.get2d()?.setTool('select'); (window as any).appLog?.('Select tool active'); }); });
+  dyeBtn.addEventListener('click', ()=>{ ensure2DThen(()=>{ setActive(dyeBtn, drawBtn, selectBtn); hooks.get2d()?.setTool('dye'); (window as any).appLog?.('Dye tool active'); }); });
   qs('#circle').addEventListener('click', ()=>{ ensure2DThen(()=>{ hooks.get2d()?.addCircle(); (window as any).appLog?.('Circle added'); }); });
   qs('#rect').addEventListener('click', ()=>{ ensure2DThen(()=>{ hooks.get2d()?.addRect(); (window as any).appLog?.('Rect added'); }); });
   qs('#clear').addEventListener('click', ()=> hooks.get2d()?.clearObstacles());
